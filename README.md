@@ -1,4 +1,4 @@
-# The Robust Quant Researcher — Five Integrated Projects
+# The Quant Researcher — Five Integrated Projects
 
 **Author:** Anna ten Bensel · **Email:** ant863@g.harvard.edu
 
