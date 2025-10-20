@@ -34,4 +34,18 @@ Each project will produce figures, CSVs, and a mini report under `results/`.
 make setup           # creates .venv and installs requirements
 make fetch-data      # downloads adjusted close prices for config/universe
 make run-ep2-demo    # runs a tiny momentum/defensive demo & prints IC
-pytest -q            # sanity tests                                        
+pytest -q            # sanity tests
+
+Roadmap
+
+Ep2: Factor Engine foundations (momentum, defensive vol, value proxy)
+
+Ep3: TFT model (multi-horizon forecasting) + interpretability
+
+Ep4: Bayesian blending of factors + TFT with uncertainty
+
+Ep5: HRP/Risk parity with turnover budgets & sector caps
+
+Ep6: Execution realism (Almgren–Chriss + synthetic LOB)
+
+PRs and issues welcome!
