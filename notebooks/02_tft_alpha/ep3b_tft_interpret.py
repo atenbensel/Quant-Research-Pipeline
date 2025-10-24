@@ -56,3 +56,36 @@ def to_long(panel: pd.DataFrame, name: str) -> pd.DataFrame:
     df.index.set_names(["date", "ticker"], inplace=True)
     return df
 
+if not os.path.exists(PRICES_CSV):
+    raise FileNotFoundError(f"Missing {PRICES_CSV}. run forest run Ep3 first to fetch/build process.")
+
+prices = pd.read_csv(PRICES_CSV, index_col=0, parse_date=True).sort_index()
+prices = prices.fill().dropna(axis=1, how="all")
+prices = prices.loc[:TEST_END]
+
+rets = pct_change(price, 1)
+
+lags1 = rets.shift(1)
+lags5 = rets.rolling(5).sum().shift(1)
+lags21 = rets.rolling(21).sum().shift(1)
+vol21 = rolling_vol(rets, 21).shift(1)
+mom126 = momentum(prices, lookback=126, skip=5).shift(1)
+
+ret_fwd_5d = make_forward_sum(rets, horizon=MAX_PRED_LENGTH)
+
+calendar = pd.DataFrame(index=prices.index)
+calendar["dow"] = price.index.dayofweek
+calendar["month"] = price.index.month
+
+df = to_long(prices, "price") \
+    .join(to_long(rets, "ret_1d"), how="left") \
+    .join(to_long(lags1, "lag1"), how="left") \
+    .join(to_long(lags5, "lag5"), how="left") \
+    .join(to_long(lags21, "lag21"), how="left") \
+    .join(to_long(lvol21, "vol21"), how="left") \
+    .join(to_long(mom126, "mom126"), how="left") \
+    .join(to_long(ret_fws_5d, TARGET_NAME), how="left")
+
+df = df.join(calendar, on="date", how="left")
+df = df.dropna(subset["price" "lag1", "lag5", "lag21", "vol21", "mom126", TARGET_NAME])
+
