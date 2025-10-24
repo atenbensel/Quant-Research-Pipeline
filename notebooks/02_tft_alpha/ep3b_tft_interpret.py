@@ -1,4 +1,4 @@
-import os, warnings, io
+import os, glob, warnings
 from typing import Tuple
 
 import numpy as np
@@ -13,10 +13,8 @@ try:
 except ImportError:
     import pytorch_lightning as pl
 
-from pytorch_forecasting import (
-    TimeSeriesDataSet,
-    TemporalFusionTransformer,
-)
+from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer
+from pytorch_forecasting.metrics import QuantileLoss
 
 pl.seed_everything(42)
 
@@ -26,12 +24,12 @@ INTERP_DIR = os.path.join(OUTDIR, "interpret")
 os.makedirs(INTERP_DIR, exist_ok=True)
 
 MAX_ENCODER_LENGTH = 126
-MAX_PRED_LENGTH    = 5
-TARGET_NAME        = "ret_fwd_5d"
+MAX_PRED_LENGTH = 5
+TARGET_NAME = "ret_fwd_5d"
 
 TRAIN_END = "2022-12-30"
-VAL_END   = "2023-12-29"
-TEST_END  = "2024-12-31"
+VAL_END = "2023-12-29"
+TEST_END = "2024-12-31"
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -57,20 +55,18 @@ def to_long(panel: pd.DataFrame, name: str) -> pd.DataFrame:
     return df
 
 if not os.path.exists(PRICES_CSV):
-    raise FileNotFoundError(f"Missing {PRICES_CSV}. Run Ep3 first to fetch/build prices.")
+    raise FileNotFoundError(f"Missing {PRICES_CSV}")
 
 prices = pd.read_csv(PRICES_CSV, index_col=0, parse_dates=True).sort_index()
 prices = prices.ffill().dropna(axis=1, how="all")
 prices = prices.loc[:TEST_END]
 
 rets = pct_change(prices, 1)
-
 lags1  = rets.shift(1)
 lags5  = rets.rolling(5).sum().shift(1)
 lags21 = rets.rolling(21).sum().shift(1)
 vol21  = rolling_vol(rets, 21).shift(1)
 mom126 = momentum(prices, lookback=126, skip=5).shift(1)
-
 ret_fwd_5d = make_forward_sum(rets, horizon=MAX_PRED_LENGTH)
 
 calendar = pd.DataFrame(index=prices.index)
@@ -79,11 +75,11 @@ calendar["month"] = prices.index.month
 
 df = to_long(prices, "price") \
     .join(to_long(rets, "ret_1d"), how="left") \
-    .join(to_long(lags1, "lag1"),   how="left") \
-    .join(to_long(lags5, "lag5"),   how="left") \
+    .join(to_long(lags1, "lag1"), how="left") \
+    .join(to_long(lags5, "lag5"), how="left") \
     .join(to_long(lags21, "lag21"), how="left") \
-    .join(to_long(vol21, "vol21"),  how="left") \
-    .join(to_long(mom126, "mom126"),how="left") \
+    .join(to_long(vol21, "vol21"), how="left") \
+    .join(to_long(mom126, "mom126"), how="left") \
     .join(to_long(ret_fwd_5d, TARGET_NAME), how="left")
 
 df = df.join(calendar, on="date", how="left")
@@ -91,7 +87,6 @@ df = df.dropna(subset=["price", "lag1", "lag5", "lag21", "vol21", "mom126", TARG
 
 date_to_idx = {d: i for i, d in enumerate(sorted(df.index.get_level_values("date").unique()))}
 df["time_idx"] = df.index.get_level_values("date").map(date_to_idx)
-
 df = df.reset_index()
 
 train_mask = df["date"] <= pd.to_datetime(TRAIN_END)
@@ -115,7 +110,6 @@ training = TimeSeriesDataSet(
     add_relative_time_idx=True,
     add_target_scales=False,
 )
-
 validation = TimeSeriesDataSet.from_dataset(training, df_val, stop_randomization=True)
 test_ds    = TimeSeriesDataSet.from_dataset(training, df_test, stop_randomization=True)
 
@@ -123,36 +117,43 @@ val_loader  = validation.to_dataloader(train=False, batch_size=256, num_workers=
 test_loader = test_ds.to_dataloader(train=False,  batch_size=256, num_workers=2)
 
 best_path_txt = os.path.join(OUTDIR, "best_checkpoint.txt")
-if not os.path.exists(best_path_txt):
-    raise FileNotFoundError(
-        f"Missing {best_path_txt}. Run forest run ep3_tft_alpha.py first so it writes the best checkpoint path."
-    )
-with open(best_path_txt, "r") as f:
-    ckpt_path = f.read().strip()
-
+ckpt_path = None
+if os.path.exists(best_path_txt):
+    with open(best_path_txt, "r") as f:
+        ckpt_path = f.read().strip()
 if not ckpt_path or not os.path.exists(ckpt_path):
-    raise FileNotFoundError(f"Checkpoint path invalid/missing: {ckpt_path}")
+    candidates = []
+    candidates += glob.glob(os.path.join(OUTDIR, "*.ckpt"))
+    candidates += glob.glob(os.path.join(OUTDIR, "lightning_logs", "*", "checkpoints", "*.ckpt"))
+    if candidates:
+        ckpt_path = max(candidates, key=os.path.getmtime)
+if not ckpt_path or not os.path.exists(ckpt_path):
+    raise FileNotFoundError("No checkpoint found. Train ep3_tft_alpha.py first.")
 
 tft = TemporalFusionTransformer.load_from_checkpoint(ckpt_path)
 tft.eval()
 tft.to(DEVICE)
 
+val_raw  = tft.predict(val_loader,  mode="raw", return_x=True)
+test_raw = tft.predict(test_loader, mode="raw", return_x=True)
+
+def build_interp(raw_obj):
+    try:
+        return tft.interpret_output(raw_obj.output, reduction="sum")
+    except Exception:
+        return tft.interpret_output(raw_obj, reduction="sum")
+
+val_interp  = build_interp(val_raw)
+test_interp = build_interp(test_raw)
+
 def summarize_vars_any(var_block, feature_names) -> pd.DataFrame:
-    """
-    var_block can be:
-      - dict {feature_name: tensor(...)}  (older PF versions)
-      - torch.Tensor [batch, time, n_vars] (newer PF versions)
-    feature_names: list of names in the order used by the dataset (training.reals)
-    Returns a tidy DataFrame(feature, importance) sorted desc.
-    """
     if isinstance(var_block, dict):
         items = []
         for name, tensor in var_block.items():
             arr = tensor.detach().cpu().numpy()
             score = float(np.nanmean(arr))
             items.append((name, score))
-        df = pd.DataFrame(items, columns=["feature", "importance"]).sort_values("importance", ascending=False)
-        return df
+        return pd.DataFrame(items, columns=["feature", "importance"]).sort_values("importance", ascending=False)
 
     if isinstance(var_block, torch.Tensor):
         arr = var_block.detach().cpu().numpy()
@@ -160,18 +161,16 @@ def summarize_vars_any(var_block, feature_names) -> pd.DataFrame:
             imp = arr.mean(axis=(0, 1))
         elif arr.ndim == 2:
             imp = arr.mean(axis=0)
+        elif arr.ndim == 1:
+            imp = arr
         else:
             raise ValueError(f"Unexpected var_block shape {arr.shape}")
 
         n = len(feature_names)
-        if imp.shape[-1] != n:
-            m = min(imp.shape[-1], n)
-            imp = imp[:m]
-            feature_names = feature_names[:m]
-
-        df = pd.DataFrame({"feature": feature_names, "importance": imp})
-        df = df.sort_values("importance", ascending=False)
-        return df
+        m = min(len(imp), n)
+        imp = imp[:m]
+        names = feature_names[:m]
+        return pd.DataFrame({"feature": names, "importance": imp}).sort_values("importance", ascending=False)
 
     raise TypeError(f"Unsupported type for var_block: {type(var_block)}")
 
@@ -180,28 +179,24 @@ real_feature_names = list(training.reals)
 enc_val = summarize_vars_any(val_interp["encoder_variables"], real_feature_names)
 dec_val = summarize_vars_any(val_interp["decoder_variables"], real_feature_names)
 
-def summarize_vars(var_dict: dict) -> pd.DataFrame:
-    items = []
-    for name, tensor in var_dict.items():
-        arr = tensor.detach().cpu().numpy()
-        score = float(np.nanmean(arr))
-        items.append((name, score))
-    out = pd.DataFrame(items, columns=["feature", "importance"]).sort_values("importance", ascending=False)
-    return out
-
-enc_val = summarize_vars(val_interp["encoder_variables"])
-dec_val = summarize_vars(val_interp["decoder_variables"])
-
 enc_val.to_csv(os.path.join(INTERP_DIR, "val_encoder_variable_importance.csv"), index=False)
 dec_val.to_csv(os.path.join(INTERP_DIR, "val_decoder_variable_importance.csv"), index=False)
 
 def summarize_attention(attn_tensor) -> pd.Series:
     a = attn_tensor.detach().cpu().numpy()
-    avg = a.mean(axis=(0, 1, 2))
+    if a.ndim == 4:
+        avg = a.mean(axis=(0, 1, 2))
+    elif a.ndim == 3:
+        avg = a.mean(axis=(0, 1))
+    elif a.ndim == 2:
+        avg = a.mean(axis=0)
+    else:
+        avg = np.asarray(a).ravel()
     return pd.Series(avg)
 
-attn_series = summarize_attention(val_interp["attention"])
-attn_series.to_csv(os.path.join(INTERP_DIR, "val_attention_encoder_steps.csv"), index=False)
+if "attention" in val_interp:
+    attn_series = summarize_attention(val_interp["attention"])
+    attn_series.to_csv(os.path.join(INTERP_DIR, "val_attention_encoder_steps.csv"), index=False)
 
 plt.figure(figsize=(8, 4))
 enc_val.head(12).plot.bar(x="feature", y="importance", legend=False, title="Encoder Variable Importance (VAL)")
@@ -220,10 +215,10 @@ def safe_plot(idx: int, raw, interp, prefix: str):
         fig = tft.plot_interpretation(raw, idx=idx, interpretation=interp)
         fig.savefig(os.path.join(INTERP_DIR, f"{prefix}_sample{idx}.png"), dpi=150, bbox_inches="tight")
         plt.close(fig)
-    except Exception as e:
-        print(f"Plot error at idx={idx}:", e)
+    except Exception:
+        pass
 
 for i in range(3):
-    safe_plot(i, val_raw.output, val_interp, prefix="val")
+    safe_plot(i, val_raw.output if hasattr(val_raw, "output") else val_raw, val_interp, prefix="val")
 
 print(f"Saved interpretability artifacts to: {INTERP_DIR}")
