@@ -24,3 +24,14 @@ PRICES_CSV = "data/raw/prices_sp100.csv"
 OUTDIR = "results/ep3_tft_alpha"
 INTERP_DIR = os.path.join(OUTDIR, "interpret")
 os.makedirs(INTERP_DIR, exist_ok=True)
+
+MAX_ENCODER_LENGTH = 126
+MAX_PRED_LENGTH = 5
+TARGET_NAME = "ret_fwd_5d"
+
+TRAIN_END = "2022-12-30"
+VAL_END = "2023-12-29"
+TEST_END =  "2024-12-31"
+
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
