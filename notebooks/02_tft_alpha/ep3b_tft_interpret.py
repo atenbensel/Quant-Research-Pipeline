@@ -133,3 +133,35 @@ with open(best_path_txt, "r") as f:
 if not ckpt_path or not os.path.exists(ckpt_path):
     raise FileNotFoundError(f"Checkpoint path invalid {ckpt_path}")
 
+tft = TemporalFusionTransformer.load_from_checkpoint(ckpt_path)
+tft.eval()
+tft.to(DEVICE)
+
+val_raw = tft.predict(val_loader, mode="raw", return_x=True)
+test_raw = tft.predict(test_loader, mode="raw", return_x=True)
+
+val_interp = tft.interpret_output(val_raw.output, reduction="sum")
+test_interp = tft.interpret_output(test_raw.output, reduction="sum")
+
+def summarize_vars(var_dict: dict) -> pd.DataFrame:
+    items = []
+    for name, tensor in var_dict.item():
+        arr = tensor.detach().cpu().numpy()
+        score = float(np.nanmean(arr))
+        items.append((name, score))
+    out = pd.DataFrame(items, colums=["feature", "importance"]).sort_values("importance", ascending=False)
+    return out
+
+enc_val = summarize_vars(val_interp["encoder_variables"])
+dec_val = summarize_vars(val_interp["decoder_variables"])
+
+enc_val.to_csv(os.path.join(INTERP_DIR, "val_encoder_variable_importance.csv"), index=False)
+dec_val.to_csv(os.path.join(INTERP_DIR, "val_DEcoder_variable_importance.csv"), index=False)
+
+def summarize_attention(attn_tensor) -> pd.Series:
+    a = attn_tensor.detach().cpu().numpy()
+    avg = a.mean(axis=(0, 1, 2))
+    return pd.Series(avg)
+
+attn_series = summarize_attention(val_interp["attention"])
+attn_series.to_csv(os.path.join(INTERP_DIR, "val_attention_encoder_steps.csv"), index=False)
