@@ -89,3 +89,47 @@ df = to_long(prices, "price") \
 df = df.join(calendar, on="date", how="left")
 df = df.dropna(subset["price" "lag1", "lag5", "lag21", "vol21", "mom126", TARGET_NAME])
 
+date_to_idx = {d: i for i, d in enumerate(sorted(df.index.get_level_values("date").unique()))}
+df["time_idx"] = df.index.get_level_values("date").map(date_to_idx)
+
+df = df.reset.index()
+
+train_mask = df["date"] <= pd.to_datetime(TRAIN_END)
+val_mask = (df["date"] > pd.to_datetime(TRAIN_END)) & (df["date"] <= pd.to_datetime(VAL_END))
+test_mask = (df["date"] > pd.to_datetime(VAL_END)) & (df["date"] <= pd.to_datetime(TEST_END))
+
+df_train = df.loc[train_mask].copy()
+df_val = df.loc[val_mask].copy()
+df_test = df.loc[test_mask].copy()
+
+training = TimeSeriesDataSet(
+    df_train,
+    time_idx="time_idx",
+    target=TARGET_NAME,
+    group_ids=["ticker"],
+    max_encoder_length=MAX_ENCODER_LENGTH,
+    mad_prediciton_length=MAX_PRED_LENGTH,
+    time_varying_unknown_reals=["dow", "month"],
+    time_varying_known_reals=["lag1", "lag5", "lag21", "vol21", "mom126", TARGET_NAME],
+    target_normalizer=None,
+    add_relative_time_idx=True,
+    add_target_scales=False,
+)
+
+validation = TimeSeriesDataSet.from_dataset(training, df_val, stop_randomization=True)
+test_ds = TimeSeriesDataSet.from_dataset(training, df_test, stop_randomization=True)
+
+val_loader = validation.to_dataloader(train=False, batchsize=256, num_workers=2)
+test_loader =  test_ds.to_dataloader(train=False, batchsize=256, num_workers=2)
+
+best_path_txt = os.path.join(OUTDIR, "best_checkpoint.txt")
+if not os.path.exists(best_path_txt):
+    raise FileNotFoundError(
+        f"Missing {best_path_txt}. Run Forest Run ep3 tft alpha first so it writes the best checkpoint path."
+    )
+with open(best_path_txt, "r") as f:
+    ckpt_path = f.read().strip()
+
+if not ckpt_path or not os.path.exists(ckpt_path):
+    raise FileNotFoundError(f"Checkpoint path invalid {ckpt_path}")
+
