@@ -137,11 +137,48 @@ tft = TemporalFusionTransformer.load_from_checkpoint(ckpt_path)
 tft.eval()
 tft.to(DEVICE)
 
-val_raw  = tft.predict(val_loader,  mode="raw", return_x=True)
-test_raw = tft.predict(test_loader, mode="raw", return_x=True)
+def summarize_vars_any(var_block, feature_names) -> pd.DataFrame:
+    """
+    var_block can be:
+      - dict {feature_name: tensor(...)}  (older PF versions)
+      - torch.Tensor [batch, time, n_vars] (newer PF versions)
+    feature_names: list of names in the order used by the dataset (training.reals)
+    Returns a tidy DataFrame(feature, importance) sorted desc.
+    """
+    if isinstance(var_block, dict):
+        items = []
+        for name, tensor in var_block.items():
+            arr = tensor.detach().cpu().numpy()
+            score = float(np.nanmean(arr))
+            items.append((name, score))
+        df = pd.DataFrame(items, columns=["feature", "importance"]).sort_values("importance", ascending=False)
+        return df
 
-val_interp = tft.interpret_output(val_raw.output, reduction="sum")
-test_interp = tft.interpret_output(test_raw.output, reduction="sum")
+    if isinstance(var_block, torch.Tensor):
+        arr = var_block.detach().cpu().numpy()
+        if arr.ndim == 3:
+            imp = arr.mean(axis=(0, 1))
+        elif arr.ndim == 2:
+            imp = arr.mean(axis=0)
+        else:
+            raise ValueError(f"Unexpected var_block shape {arr.shape}")
+
+        n = len(feature_names)
+        if imp.shape[-1] != n:
+            m = min(imp.shape[-1], n)
+            imp = imp[:m]
+            feature_names = feature_names[:m]
+
+        df = pd.DataFrame({"feature": feature_names, "importance": imp})
+        df = df.sort_values("importance", ascending=False)
+        return df
+
+    raise TypeError(f"Unsupported type for var_block: {type(var_block)}")
+
+real_feature_names = list(training.reals)
+
+enc_val = summarize_vars_any(val_interp["encoder_variables"], real_feature_names)
+dec_val = summarize_vars_any(val_interp["decoder_variables"], real_feature_names)
 
 def summarize_vars(var_dict: dict) -> pd.DataFrame:
     items = []
