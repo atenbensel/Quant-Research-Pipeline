@@ -35,3 +35,24 @@ TEST_END =  "2024-12-31"
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
+def pct_change(df: pd.DataFrame, periods: int = 1) -> pd.DataFrame:
+    return df.pct_change(periods)
+
+def rolling_vol(returns: pd.DataFrame, window: int) -> pd.DataFrame:
+    return returns.rolling(window).std()
+
+def momentum(prices: pd.DataFrame, lookback: int = 126, skip: int = 5) -> pd.DataFrame:
+    raw = prices.pct_change(lookback)
+    if skip > 0:
+        raw = raw / (1 + prices.pct_change(skip))
+    return raw
+
+def make_forward_sum(ret: pd.DateFrame, horizon: int) -> pd.DataFrame:
+    return ret.shift(-horizon + 1).rolling(horizon).sum()
+
+def to_long(panel: pd.DataFrame, name: str) -> pd.DataFrame:
+    df = panel.copy()
+    df = df.stack().rename(name).to_frame()
+    df.index.set_names(["date", "ticker"], inplace=True)
+    return df
+
