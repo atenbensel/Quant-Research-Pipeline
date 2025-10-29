@@ -62,3 +62,38 @@ weights = bayesian_weights(resids)
 print("Bayesian weights:", weights)
 
 blend = sum(weights[k] * factor_signals[k] for k in factor_signals.keys())
+
+def spearman_ic(scores: pd.DataFrame, fwd: pd.DataFrame):
+    s, f = scores.align(fwd, join="inner")
+    return s.corrwith(f, axis=1, method="spearman").dropna()
+
+def decile_long_short(scores: pd.DataFrame, fwd: pd.DataFrame, top=0.1, bottom=0.1):
+    s, fr = scores.align(fwd, join="inner")
+    out = []
+    for date in s.index:
+        row = s.loc[date].dropna()
+        if row.empty:
+            out.append(np.nan)
+            continue
+        n = len(row)
+        k = max(1, int(n * top))
+        j = max(1, int(n * bottom))
+        long = row.nlargest(k).index
+        short = row.nsmallest(j).index
+        r = fr.loc[date, long].mean() - fr.loc[date, short].mean()
+        out.append(r)
+    return pd.Series(out, index=s.index, name="ls").dropna()
+
+blend_ic = spearman_ic(blend, rets)
+blend_ls = decile_long_short(blend, rets)
+
+ann = math.sqrt(252)
+sr = ann * blend_ls.mean() / (blend_ls.std() + 1e-9)
+
+summary = pd.DataFrame({
+    "Metric": ["Mean IC", "IC IR", "LS Sharpe"],
+    "Value": [blend_ic.mean(), blend_ic.mean()/blend_ic.std(), sr]
+})
+summary.to_csv(os.path.join(OUTDIR, "summary.csv"), index=False)
+
+print(summary)
