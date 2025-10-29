@@ -18,3 +18,13 @@ fwd1 = prices.pct_change().shift(-1)
 mom_curve = pd.read_csv(os.path.join(FACTOR_DIR, "MOM_6M_skip1w_curves.csv"), index_col=0)
 def_curve = pd.read_csv(os.path.join(FACTOR_DIR, "DEF_vol_1M_curves.csv"), index_col=0)
 val_curve = pd.read_csv(os.path.join(FACTOR_DIR, "VAL_proxy_curves.csv"), index_col=0)
+
+preds_path = os.path.join(TFT_DIR, "tft_predictions.csv")
+if not os.path.exists(preds_path):
+    raise FileNotFoundError(f"Missing {preds_path} — make sure to save TFT out-of-sample predictions.")
+tft_preds = pd.read_csv(preds_path, parse_dates=["date"])
+tft_preds = tft_preds.pivot(index="date", columns="ticker", values="prediction")
+
+common_dates = prices.index.intersection(tft_preds.index)
+prices = prices.loc[common_dates]
+tft_preds = tft_preds.loc[common_dates]
