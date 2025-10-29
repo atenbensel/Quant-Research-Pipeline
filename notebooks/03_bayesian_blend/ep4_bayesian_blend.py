@@ -30,7 +30,7 @@ prices = prices.loc[common_dates]
 tft_preds = tft_preds.loc[common_dates]
 
 def zscore(df):
-    return df.sub(df.mean(axis=1)
+    return df.sub(df.mean(axis=1))
                   
 np.random.seed(42)
 tickers = prices.columns[:50]
