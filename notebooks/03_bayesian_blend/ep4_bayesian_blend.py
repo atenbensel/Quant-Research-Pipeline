@@ -28,3 +28,19 @@ tft_preds = tft_preds.pivot(index="date", columns="ticker", values="prediction")
 common_dates = prices.index.intersection(tft_preds.index)
 prices = prices.loc[common_dates]
 tft_preds = tft_preds.loc[common_dates]
+
+def zscore(df):
+    return df.sub(df.mean(axis=1)
+                  
+np.random.seed(42)
+tickers = prices.columns[:50]
+dates = common_dates
+factor_signals = {
+    "mom": pd.DataFrame(np.random.randn(len(dates), len(tickers)), index=dates, columns=tickers),
+    "def": pd.DataFrame(np.random.randn(len(dates), len(tickers)), index=dates, columns=tickers),
+    "val": pd.DataFrame(np.random.randn(len(dates), len(tickers)), index=dates, columns=tickers),
+    "tft": tft_preds[tickers]
+}
+
+for k, v in factor_signals.items():
+    factor_signals[k] = zscore(v)
