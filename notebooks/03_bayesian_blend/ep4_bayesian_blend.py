@@ -97,3 +97,20 @@ summary = pd.DataFrame({
 summary.to_csv(os.path.join(OUTDIR, "summary.csv"), index=False)
 
 print(summary)
+
+plt.figure(figsize=(10, 5))
+plt.plot(blend_ls.cumsum(), label="Blended LS Cumulative Return")
+plt.axhline(0, color="k", lw=0.8)
+plt.title("Bayesian Alpha Blend Performance")
+plt.legend()
+plt.tight_layout()
+plt.savefig(os.path.join(OUTDIR, "blend_cumulative.png"), dpi=150)
+plt.close()
+
+blend_ic.rolling(63).mean().plot(figsize=(10, 3), title="Rolling 3M Information Coefficient")
+plt.axhline(0, color="k", lw=0.8)
+plt.tight_layout()
+plt.savefig(os.path.join(OUTDIR, "blend_ic_rolling.png"), dpi=150)
+plt.close()
+
+print("Saved outputs to:", OUTDIR)
