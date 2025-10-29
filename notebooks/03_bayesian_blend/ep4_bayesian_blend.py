@@ -44,3 +44,21 @@ factor_signals = {
 
 for k, v in factor_signals.items():
     factor_signals[k] = zscore(v)
+
+ROLL_WINDOW = 63
+
+def bayesian_weights(resid_dict):
+    vars_ = {k: v.rolling(ROLL_WINDOW).var().mean() for k, v in resid_dict.items()}
+    precisions = {k: 1 / (v + 1e-8) for k, v in vars_.items()}
+    total = sum(precisions.values())
+    weights = {k: v / total for k, v in precisions.items()}
+    return weights
+
+rets = prices.pct_change().shift(-1)
+aligned = {k: v.align(rets, join="inner")[0] for k, v in factor_signals.items()}
+resids = {k: rets - aligned[k] for k in factor_signals.keys()}
+
+weights = bayesian_weights(resids)
+print("Bayesian weights:", weights)
+
+blend = sum(weights[k] * factor_signals[k] for k in factor_signals.keys())
